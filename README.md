@@ -47,6 +47,10 @@ License
 -------
 Licensed under GNU GPL v3.0.
 
+Screenshot
+----------
+![scrot](https://github.com/mharrys/billboarding/raw/master/scrot.png "Screenshot")
+
 How-to
 ------
 You will need a C++11 compiler, GLM, GLEW and SDL2. Consult SConstruct for
