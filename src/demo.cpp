@@ -23,8 +23,6 @@ bool Demo::create(std::shared_ptr<Window> window)
     this->window = window;
     window->request_pointer_lock(true);
 
-    update_dimension();
-
     if (!create_shaders()) {
         return false;
     }
@@ -261,9 +259,13 @@ void Demo::update_dimension()
     if (width != dimension.first || height != dimension.second) {
         width = dimension.first;
         height = dimension.second;
+
         glViewport(0, 0, width, height);
+
         camera_control.window_width = width;
         camera_control.window_height = height;
+
+        camera.aspect_ratio = width / static_cast<float>(height);
     }
 }
 
