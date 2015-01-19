@@ -41,10 +41,6 @@ by Geeks 3D.
 + Press `w`, `a`, `d`, `s` to fly forward, left, right or back.
 + Press `r`, `q` to fly up and down.
 
-License
--------
-Licensed under GNU GPL v3.0.
-
 Screenshot
 ----------
 ![scrot](https://github.com/mharrys/billboarding/raw/master/scrot.png "Screenshot")
