@@ -1,14 +1,18 @@
 #version 130
 
-uniform mat4 mvp;
+uniform mat4 model_view;
+uniform mat4 projection;
 
 in vec4 vertex_position;
-in vec4 vertex_color;
+in vec2 vertex_tex_coord;
 
-out vec4 color;
+out vec4 position;
+out vec2 tex_coord;
 
 void main()
 {
-    color = vertex_color;
-    gl_Position = mvp * vertex_position;
+    position = vertex_position;
+    tex_coord = vertex_tex_coord;
+
+    gl_Position = projection * model_view * vertex_position;
 }

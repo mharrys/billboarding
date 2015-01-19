@@ -1,390 +1,209 @@
 #include "demo.hpp"
 
-#include "fragmentshader.hpp"
-#include "image.hpp"
-#include "pngloader.hpp"
-#include "vertexshader.hpp"
-
-#include "lib/gl.hpp"
-
-#include <iostream>
-
-Demo::Demo()
-    : controls(true),
+Demo::Demo(std::shared_ptr<gst::Logger> logger, gst::Window window)
+    : logger(logger),
+      window(window),
       billboarding(true),
-      gpu(false),
       spherical(false),
       cheap_method(false)
 {
 }
 
-bool Demo::create(std::shared_ptr<Window> window)
+bool Demo::create()
 {
-    this->window = window;
-    window->request_pointer_lock(true);
+    const auto size = window.get_size();
 
-    if (!create_shaders()) {
-        return false;
-    }
+    render_state = std::make_shared<gst::RenderState>(size);
+    renderer = gst::Renderer(logger, render_state);
 
-    if (!create_billboards()) {
-        return false;
-    }
+    auto camera = std::make_shared<gst::PerspectiveCamera>(45.0f, size, 0.1f, 2000.0f);
+    scene = gst::Scene(camera);
+    scene.eye->translate_z(140.0f);
 
-    create_floor();
+    gst::ProgramFactory program_factory(logger);
+    gst::ProgramPool programs(program_factory);
 
-    camera.far = 2000.0f;
-    camera.translate_z(140.0f);
+    create_floor(programs);
+    create_billboards(programs);
 
-    glEnable(GL_DEPTH_TEST);
+    controls.movement_speed = 130.0f;
+    window.set_pointer_lock(true);
 
-    glEnable(GL_CULL_FACE);
-    glCullFace(GL_BACK);
-
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-
-    std::cout << "F1: toggle billboarding." << std::endl;
-    std::cout << "F2: toggle adjusting model-view matrix for cheap method on GPU or CPU." << std::endl;
-    std::cout << "F3: toggle between spherical and cylindrical billboarding." << std::endl;
-    std::cout << "F4: toggle between cheap and true method." << std::endl;
-    std::cout << "F5: toggle controls." << std::endl;
+    logger->log("F1: toggle billboarding.");
+    logger->log("F2: toggle between spherical and cylindrical billboarding.");
+    logger->log("F3: toggle between cheap and true method.");
 
     return true;
 }
 
-void Demo::update(seconds dt, seconds, Input & input)
+void Demo::update(gst::seconds dt, gst::seconds)
 {
-    update_dimension();
+    update_input(dt);
+    update_billboards();
+    scene.update();
 
-    if (input.pressed(Key::F1)) {
-        billboarding = !billboarding;
-        std::cout << "billboarding: " << (billboarding ? "on" : "off") << std::endl;
-        if (billboarding) {
-            glEnable(GL_CULL_FACE);
-        } else {
-            glDisable(GL_CULL_FACE);
-        }
-    }
-
-    if (input.pressed(Key::F2)) {
-        gpu = !gpu;
-        std::cout << "adjusting: " << (gpu ? "GPU" : "CPU")  << std::endl;
-    }
-
-    if (input.pressed(Key::F3)) {
-        spherical = !spherical;
-        std::cout << "type: " << (spherical ? "spherical" : "cylindrical") << std::endl;
-    }
-
-    if (input.pressed(Key::F4)) {
-        cheap_method = !cheap_method;
-        std::cout << "method: " << (cheap_method ? "cheap" : "true") << std::endl;
-    }
-
-    if (input.pressed(Key::F5)) {
-        controls = !controls;
-        window->request_pointer_lock(controls);
-    }
-
-    if (controls) {
-        camera_control.update(dt, input, camera);
-        camera.update_world_transform();
-    }
-
-    if (billboarding && !cheap_method) {
-        for (unsigned int i = 0; i < billboards.size(); i++) {
-            update_true(*billboards[i].get());
-        }
-    } else {
-        // keep resetting the billboard orientations (for true method)
-        for (unsigned int i = 0; i < billboards.size(); i++) {
-            billboards[i]->mesh.orientation = glm::quat();
-            billboards[i]->mesh.update_world_transform();
-        }
-    }
-}
-
-void Demo::render()
-{
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
-    draw_floor();
-
-    if (cheap_method) {
-        render_cheap();
-    } else {
-        render_true();
-    }
-
-    gl_print_error();
+    renderer.render(scene);
+    renderer.check_errors();
 }
 
 void Demo::destroy()
 {
-    window->request_pointer_lock(false);
+    window.set_pointer_lock(false);
 }
 
-bool Demo::create_shaders()
+void Demo::create_floor(gst::ProgramPool & programs)
 {
-    VertexShader basic_vs;
-    basic_vs.compile_from_file("assets/shaders/basic.vs");
+    auto basic_pass = std::make_shared<BasicPass>();
+    basic_pass->program = programs.create(BASIC_VS, BASIC_FS);
+    basic_pass->cull_face = gst::CullFace::BACK;
+    basic_pass->depth_test = true;
 
-    FragmentShader basic_fs;
-    basic_fs.compile_from_file("assets/shaders/basic.fs");
+    auto render_technique = std::make_shared<gst::Technique>();
+    render_technique->passes = { basic_pass };
 
-    VertexShader billboard_vs;
-    billboard_vs.compile_from_file("assets/shaders/billboard_cheap.vs");
+    gst::ImageFactory image_factory(logger);
+    auto grass_image = image_factory.create_from_file(GRASS);
 
-    VertexShader texture_vs;
-    texture_vs.compile_from_file("assets/shaders/texture.vs");
+    gst::TextureParam tex_param;
+    tex_param.source_format = gst::PixelFormat::RGBA;
+    auto grass_texture = gst::Texture(render_state, grass_image, tex_param);
 
-    FragmentShader texture_fs;
-    texture_fs.compile_from_file("assets/shaders/texture.fs");
+    gst::Effect effect;
+    effect.uniforms("color_map") = 0;
+    effect.uniforms("alpha") = 1.0f;
+    effect.textures = { grass_texture };
+    effect.techniques = { render_technique };
 
-    if (!basic_program.attach(basic_vs, basic_fs)) {
-        return false;
-    }
-
-    if (!billboard_program.attach(billboard_vs, texture_fs)) {
-        return false;
-    }
-
-    if (!texture_program.attach(texture_vs, texture_fs)) {
-        return false;
-    }
-
-    return true;
-}
-
-bool Demo::create_billboards()
-{
-    TextureSetting texture_setting = {
-        TextureFormat::RGBA, // internal
-        TextureFormat::RGBA, // source
-        {
-            { FilterParameter::MIN_FILTER, FilterMode::LINEAR },
-            { FilterParameter::MAG_FILTER, FilterMode::LINEAR }
-        },
-        {
-            { WrapParameter::WRAP_S, WrapMode::CLAMP_TO_EDGE },
-            { WrapParameter::WRAP_T, WrapMode::CLAMP_TO_EDGE }
-        }
+    gst::MeshFactory mesh_factory(logger, render_state);
+    auto mesh = mesh_factory.create_quad(2000.0f, 2000.0f);
+    mesh.tex_coords.data = {
+        glm::vec2( 0.0f, 80.0f),
+        glm::vec2(80.0f, 80.0f),
+        glm::vec2( 0.0f,  0.0f),
+        glm::vec2(80.0f,  0.0f),
     };
+    mesh.tex_coords.buffer_data();
+
+    auto model = std::make_shared<gst::Model>(mesh, effect);
+    auto model_node = std::make_shared<gst::ModelNode>(model);
+    model_node->rotate_x(-90.0f);
+    model_node->position.y = -30.0f;
+
+    scene.add(model_node);
+}
+
+void Demo::create_billboards(gst::ProgramPool & programs)
+{
+    auto basic_pass = std::make_shared<BasicPass>();
+    basic_pass->program = programs.create(CHEAP_VS, BASIC_FS);
+    basic_pass->blend_mode = gst::BlendMode::INTERPOLATIVE;
+    basic_pass->cull_face = gst::CullFace::BACK;
+    basic_pass->depth_test = true;
+
+    auto render_technique = std::make_shared<gst::Technique>();
+    render_technique->passes = { basic_pass };
 
     std::vector<glm::vec3> tree_positions = {
         glm::vec3( -50.0f, 3.0f,   50.0f),
         glm::vec3(-300.0f, 0.0f, -800.0f),
         glm::vec3(  30.0f, 0.0f, -420.0f),
-        glm::vec3( 120.0f, 8.0f, -200.0f)
+        glm::vec3( 120.0f, 8.0f, -200.0f),
     };
 
-    for (int i = 1; i <= 4; i++) {
-        std::unique_ptr<Billboard> billboard(new Billboard());
+    std::vector<std::string> tree_textures = {
+        TREE1, TREE2, TREE3, TREE4
+    };
 
-        auto image = PNGLoader::load("assets/textures/tree" + std::to_string(i) + ".png");
-        if (!image) {
-            return false;
-        }
-        billboard->texture.make(*image.get(), texture_setting);
+    gst::ImageFactory image_factory(logger);
+    gst::MeshFactory mesh_factory(logger, render_state);
 
-        const float w = image->width;
-        const float h = image->height;
-        billboard->mesh.positions = {
-            glm::vec3(-w,  h, 0.0f),
-            glm::vec3(-w, -h, 0.0f),
-            glm::vec3( w, -h, 0.0f),
-            glm::vec3( w,  h, 0.0f),
-        };
+    gst::TextureParam tex_param;
+    tex_param.internal_format = gst::TextureFormat::RGBA;
+    tex_param.source_format = gst::PixelFormat::RGBA;
+    tex_param.wrap_s = gst::WrapMode::CLAMP_TO_EDGE;
+    tex_param.wrap_t = tex_param.wrap_s;
 
-        billboard->mesh.tex_coords = {
-            glm::vec2(0.0f, 0.0f),
-            glm::vec2(0.0f, 1.0f),
-            glm::vec2(1.0f, 1.0f),
-            glm::vec2(1.0f, 0.0f),
-        };
+    billboard_effect.uniforms("color_map") = 0;
+    billboard_effect.uniforms("alpha") = 1.0f;
+    billboard_effect.uniforms("scale") = glm::vec3(0.1f);
+    billboard_effect.uniforms("billboarding") = billboarding;
+    billboard_effect.uniforms("spherical") = spherical;
+    billboard_effect.uniforms("cheap_method") = cheap_method;
+    billboard_effect.techniques = { render_technique };
 
-        billboard->mesh.indices = {
-            0, 1, 2,
-            0, 2, 3,
-        };
+    for (int i = 0; i < 4; i++) {
+        auto tree_image = image_factory.create_from_file(tree_textures[i]);
+        auto tree_texture = gst::Texture(render_state, tree_image, tex_param);
+        billboard_effect.textures = { tree_texture };
 
-        billboard->mesh.update_positions = true;
-        billboard->mesh.update_tex_coords = true;
-        billboard->mesh.update_indices = true;
+        auto quad_size = tree_image.get_size();
+        auto mesh = mesh_factory.create_quad(quad_size.get_width(), quad_size.get_height());
 
-        billboard->mesh.position = tree_positions[i - 1];
-        billboard->mesh.scale = glm::vec3(0.1f);
-        billboard->mesh.update_world_transform();
+        auto model = std::make_shared<gst::Model>(mesh, billboard_effect);
+        auto billboard = std::make_shared<Billboard>(model);
 
-        billboards.push_back(std::move(billboard));
+        billboard->position = tree_positions[i];
+        billboard->scale = glm::vec3(0.1f);
+
+        billboards.push_back(billboard);
+        scene.add(billboard);
+    }
+}
+
+void Demo::update_input(gst::seconds dt)
+{
+    auto input = window.get_input();
+
+    if (input.pressed(gst::Key::F1)) {
+        billboarding = !billboarding;
+        billboard_effect.uniforms("billboarding") = billboarding;
+
+        std::string status = billboarding ? "on" : "off";
+        logger->log("billboarding: " + status);
     }
 
-    return true;
+    if (input.pressed(gst::Key::F2)) {
+        spherical = !spherical;
+        billboard_effect.uniforms("spherical") = spherical;
+
+        std::string status = spherical ? "spherical" : "cylindrical";
+        logger->log("type: " + status);
+    }
+
+    if (input.pressed(gst::Key::F3)) {
+        cheap_method = !cheap_method;
+        billboard_effect.uniforms("cheap_method") = cheap_method;
+
+        std::string status = cheap_method ? "cheap" : "true";
+        logger->log("method: " + status);
+    }
+
+    controls.update(dt, input, *scene.eye.get());
 }
 
-void Demo::create_floor()
+void Demo::update_billboards()
 {
-    floor.positions = {
-        glm::vec3(-500, 1000.0f, 0.0f),
-        glm::vec3(-500, -200.0f, 0.0f),
-        glm::vec3( 500, -200.0f, 0.0f),
-        glm::vec3( 500, 1000.0f, 0.0f),
-    };
-
-    floor.colors = {
-        glm::vec3(0.1f),
-        glm::vec3(0.2f),
-        glm::vec3(0.2f),
-        glm::vec3(0.1f)
-    };
-
-    floor.indices = {
-        0, 1, 2,
-        0, 2, 3
-    };
-
-    floor.update_positions = true;
-    floor.update_colors = true;
-    floor.update_indices = true;
-
-    floor.rotate_x(-90.0f);
-    floor.position.y = -30.0f;
-    floor.update_world_transform();
-}
-
-void Demo::update_dimension()
-{
-    auto dimension = window->dimension();
-    if (width != dimension.first || height != dimension.second) {
-        width = dimension.first;
-        height = dimension.second;
-
-        glViewport(0, 0, width, height);
-
-        camera_control.window_width = width;
-        camera_control.window_height = height;
-
-        camera.aspect_ratio = width / static_cast<float>(height);
+    for (auto billboard : billboards) {
+        if (billboarding && !cheap_method) {
+            update_true(*billboard.get());
+        } else {
+            // keep resetting the billboard orientations (for true method)
+            billboard->orientation = glm::quat();
+        }
     }
 }
 
 void Demo::update_true(Billboard & billboard)
 {
-    auto & mesh = billboard.mesh;
-
     // cylindrical
-    glm::vec3 direction_proj = camera.world_position() - mesh.world_position();
+    glm::vec3 direction_proj = scene.eye->position - billboard.position;
     direction_proj.y = 0.0f;
     direction_proj = glm::normalize(direction_proj);
-    mesh.orientation = rotation_between(Z_UNIT, direction_proj);
+    billboard.orientation = rotation_between(Z_UNIT, direction_proj);
 
     if (spherical) {
-        glm::vec3 direction = camera.world_position() - mesh.world_position();
+        glm::vec3 direction = scene.eye->position - billboard.position;
         direction = glm::normalize(direction);
-        mesh.orientation = rotation_between(direction_proj, direction) * mesh.orientation;
+        billboard.orientation = rotation_between(direction_proj, direction) * billboard.orientation;
     }
-
-    billboard.mesh.update_world_transform();
-}
-
-void Demo::render_cheap()
-{
-    if (gpu) {
-        billboard_program.use();
-        billboard_program.set_uniform("billboarding", billboarding);
-        billboard_program.set_uniform("spherical", spherical);
-        for (unsigned int i = 0; i < billboards.size(); i++) {
-            draw_cheap_gpu(*billboards[i].get());
-        }
-    } else {
-        texture_program.use();
-        for (unsigned int i = 0; i < billboards.size(); i++) {
-            draw_cheap_cpu(*billboards[i].get());
-        }
-    }
-}
-
-void Demo::render_true()
-{
-    texture_program.use();
-    for (unsigned int i = 0; i < billboards.size(); i++) {
-        draw_true(*billboards[i].get());
-    }
-}
-
-void Demo::draw_floor()
-{
-    basic_program.use();
-
-    glm::mat4 m = floor.world_transform();
-    glm::mat4 v = camera.view();
-    glm::mat4 p = camera.projection();
-
-    glm::mat4 mvp = p * v * m;
-
-    basic_program.set_uniform("mvp", mvp);
-
-    floor.draw();
-}
-
-void Demo::draw_true(Billboard & billboard)
-{
-    billboard.texture.bind(0);
-
-    glm::mat4 m = billboard.mesh.world_transform();
-    glm::mat4 v = camera.view();
-    glm::mat4 p = camera.projection();
-
-    glm::mat4 mvp = p * v * m;
-
-    texture_program.set_uniform("mvp", mvp);
-
-    billboard.mesh.draw();
-}
-
-void Demo::draw_cheap_cpu(Billboard & billboard)
-{
-    billboard.texture.bind(0);
-
-    glm::mat4 m = billboard.mesh.world_transform();
-    glm::mat4 v = camera.view();
-    glm::mat4 p = camera.projection();
-
-    glm::mat4 mv = v * m;
-    if (billboarding) {
-        mv[0][0] = billboard.mesh.scale.x;
-        mv[0][1] = 0.0f;
-        mv[0][2] = 0.0f;
-        if (spherical) {
-            mv[1][0] = 0.0f;
-            mv[1][1] = billboard.mesh.scale.y;
-            mv[1][2] = 0.0f;
-        }
-        mv[2][0] = 0.0f;
-        mv[2][1] = 0.0f;
-        mv[2][2] = billboard.mesh.scale.z;
-    }
-    glm::mat4 mvp = p * mv;
-
-    texture_program.set_uniform("mvp", mvp);
-
-    billboard.mesh.draw();
-}
-
-void Demo::draw_cheap_gpu(Billboard & billboard)
-{
-    billboard.texture.bind(0);
-
-    glm::mat4 m = billboard.mesh.world_transform();
-    glm::mat4 v = camera.view();
-    glm::mat4 p = camera.projection();
-
-    glm::mat4 mv = v * m;
-
-    billboard_program.set_uniform("mv", mv);
-    billboard_program.set_uniform("projection", p);
-    billboard_program.set_uniform("scale", billboard.mesh.scale);
-
-    billboard.mesh.draw();
 }
