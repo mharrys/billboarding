@@ -1,58 +1,60 @@
 #ifndef DEMO_HPP_INCLUDED
 #define DEMO_HPP_INCLUDED
 
+#include "assets.hpp"
+#include "basicpass.hpp"
+#include "cameranode.hpp"
+#include "effect.hpp"
 #include "firstpersoncontrol.hpp"
+#include "image.hpp"
+#include "imagefactory.hpp"
+#include "input.hpp"
+#include "light.hpp"
+#include "lightnode.hpp"
+#include "logger.hpp"
 #include "mesh.hpp"
+#include "meshfactory.hpp"
+#include "model.hpp"
+#include "modelnode.hpp"
+#include "pass.hpp"
 #include "perspectivecamera.hpp"
-#include "program.hpp"
-#include "texture2d.hpp"
+#include "programfactory.hpp"
+#include "programpool.hpp"
+#include "renderer.hpp"
+#include "renderstate.hpp"
+#include "scene.hpp"
+#include "technique.hpp"
+#include "uniformgroup.hpp"
+#include "window.hpp"
 #include "world.hpp"
 
-struct Billboard {
-    Mesh mesh;
-    Texture2D texture;
-};
+typedef gst::ModelNode Billboard;
 
-class Demo : public World {
+class Demo : public gst::World {
 public:
-    Demo();
-    bool create(std::shared_ptr<Window> window) override;
-    void update(seconds delta, seconds elapsed, Input & input) override;
-    void render() override;
+    Demo(std::shared_ptr<gst::Logger> logger, gst::Window window);
+    bool create() override;
+    void update(gst::seconds delta, gst::seconds elapsed) override;
     void destroy() override;
 private:
-    bool create_shaders();
-    bool create_billboards();
-    void create_floor();
-
-    void update_dimension();
+    void create_floor(gst::ProgramPool & programs);
+    void create_billboards(gst::ProgramPool & programs);
+    void update_input(gst::seconds dt);
+    void update_billboards();
     void update_true(Billboard & billboard);
 
-    void render_cheap();
-    void render_true();
+    std::shared_ptr<gst::Logger> logger;
+    gst::Window window;
 
-    void draw_floor();
-    void draw_true(Billboard & billboard);
-    void draw_cheap_cpu(Billboard & billboard);
-    void draw_cheap_gpu(Billboard & billboard);
+    std::shared_ptr<gst::RenderState> render_state;
+    gst::Renderer renderer;
+    gst::Scene scene;
+    gst::FirstPersonControl controls;
 
-    std::shared_ptr<Window> window;
-    int width;
-    int height;
+    gst::Effect billboard_effect;
+    std::vector<std::shared_ptr<Billboard>> billboards;
 
-    Program basic_program;
-    Program billboard_program;
-    Program texture_program;
-
-    PerspectiveCamera camera;
-    FirstPersonControl camera_control;
-
-    Mesh floor;
-    std::vector<std::unique_ptr<Billboard>> billboards;
-
-    bool controls;
     bool billboarding;
-    bool gpu;
     bool spherical;
     bool cheap_method;
 };

@@ -1,11 +1,11 @@
 env = Environment(
     CC='g++',
-    CCFLAGS='-std=c++11 -pedantic -Wall -Wextra -Wno-switch -O3',
-    CPPPATH='#/',
-    LIBS=['SDL2', 'GL', 'GLEW']
+    CCFLAGS='-std=c++11 -pedantic -Wall -Wextra -O3',
 )
 
-source = Glob('src/*.cpp')
-source += ['lib/lodepng/lodepng.cpp']
+SConscript('lib/gust/SConscript', 'env', variant_dir='.gust', duplicate=0)
+env.Append(LIBS='gust')
+env.Append(LIBPATH='.gust/build')
+env.Append(CPPPATH=['lib/gust/lib', 'lib/gust/src'])
 
-program = env.Program(target='bin/billboarding', source=source);
+env.Program(target='bin/billboarding', source=Glob('src/*.cpp'))
