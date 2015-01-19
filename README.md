@@ -1,7 +1,7 @@
 Billboarding
 ============
 Billboarding is a technique that orients a object (usually a texture-mapped
-quadrilateral) such that it is always perpendicular to the camera reglardless
+quadrilateral) such that it is always perpendicular to the camera regardless
 of how the camera is transformed. It can for example be used to display
 complex geometries at a distance when detail is not required.
 
@@ -36,10 +36,8 @@ The cheap method can be easily implemented in the vertex shader as described
 by Geeks 3D.
 
 + Press `F1` to toggle billboarding.
-+ Press `F2` to toggle adjusting the model-view matrix for cheap method on the CPU or GPU.
-+ Press `F3` to toggle between spherical and cylindrical billboarding.
-+ Press `F4` to toggle between cheap and true method.
-+ Press `F5` to toggle controls.
++ Press `F2` to toggle between spherical and cylindrical billboarding.
++ Press `F3` to toggle between cheap and true method.
 + Press `w`, `a`, `d`, `s` to fly forward, left, right or back.
 + Press `r`, `q` to fly up and down.
 
@@ -53,14 +51,18 @@ Screenshot
 
 How-to
 ------
-You will need a C++11 compiler, GLM, GLEW and SDL2. Consult SConstruct for
-details.
+This project depends on [Gust](https://github.com/mharrys/gust), see its
+project page for details on dependencies.
+
+Recursive clone required
+
+    $ git clone --recursive <repository>
 
 Build and run
 
     $ scons
     $ cd bin
-    $ ./billboarding
+    $ ./arcball
 
 Cleanup
 
