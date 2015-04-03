@@ -58,7 +58,7 @@ Build and run
 
     $ scons
     $ cd bin
-    $ ./arcball
+    $ ./billboarding
 
 Cleanup
 
