@@ -15,7 +15,6 @@ public:
     void destroy() final;
 private:
     void create_scene();
-    void create_floor();
     void create_billboards();
     void update_input(float delta);
     void update_billboards();
@@ -31,7 +30,6 @@ private:
     gst::ProgramPool programs;
     gst::FirstPersonControl controls;
 
-    gst::Material billboard_material;
     std::vector<std::shared_ptr<Billboard>> billboards;
 
     bool billboarding;

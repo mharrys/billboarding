@@ -1,14 +1,16 @@
 #include "demo.hpp"
 
+#include <random>
+
 Demo::Demo(std::shared_ptr<gst::Logger> logger, std::shared_ptr<gst::Window> window)
     : logger(logger),
       window(window),
       renderer(gst::Renderer::create(logger)),
       render_size(window->get_size()),
       programs(logger),
-      controls(false, 2.5f, 130.0f),
+      controls(true, 2.5f, 15.0f),
       billboarding(true),
-      spherical(false),
+      spherical(true),
       cheap_method(false)
 {
 }
@@ -18,7 +20,6 @@ bool Demo::create()
     window->set_pointer_lock(true);
 
     create_scene();
-    create_floor();
     create_billboards();
 
     logger->log("F1: toggle billboarding.");
@@ -44,94 +45,48 @@ void Demo::destroy()
 
 void Demo::create_scene()
 {
-    scene = gst::Scene::create_perspective({ 45.0f, render_size, 0.1f, 2000.0f });
-    scene.get_eye().position.z = 140.0f;
-}
-
-void Demo::create_floor()
-{
-    auto basic_program = programs.create(BASIC_VS, BASIC_FS);
-    auto pass = std::make_shared<gst::BasicPass>(basic_program);
-    pass->set_cull_face(gst::CullFace::BACK);
-    pass->set_depth_test(true);
-
-    gst::ImageFactory image_factory(logger);
-    auto image = image_factory.create_from_file(GRASS_PNG);
-    auto texture = std::make_shared<gst::Texture2D>(gst::Texture2D::create_from_image(image));
-
-    auto material = gst::Material::create_free();
-    const auto unit = 0;
-    material.get_textures()[unit] = texture;
-    material.get_uniform("color_map") = unit;
-    material.get_uniform("alpha") = 1.0f;
-
-    gst::MeshFactory mesh_factory(logger);
-    auto mesh = mesh_factory.create_quad(2000.0f, 2000.0f);
-    mesh.set_tex_coords({
-        glm::vec2( 0.0f, 80.0f),
-        glm::vec2(80.0f, 80.0f),
-        glm::vec2( 0.0f,  0.0f),
-        glm::vec2(80.0f,  0.0f),
-    });
-    auto model = gst::Model(mesh, material, pass);
-    auto model_node = std::make_shared<gst::ModelNode>(model);
-    model_node->rotate_x(-90.0f);
-    model_node->position.y = -30.0f;
-
-    scene.add(model_node);
+    scene = gst::Scene::create_perspective({ 45.0f, render_size, 0.1f, 4000.0f });
+    scene.get_eye().position = glm::vec3(36.0f, 52.0f, 88.0f);
 }
 
 void Demo::create_billboards()
 {
-    auto basic_program = programs.create(CHEAP_VS, BASIC_FS);
-    auto pass = std::make_shared<gst::BasicPass>(basic_program);
+    gst::MeshFactory mesh_factory(logger);
+    gst::ImageFactory image_factory(logger);
+
+    auto image = image_factory.create_from_file(PEPPER_PNG, true);
+    auto texture = std::make_shared<gst::Texture2D>(gst::Texture2D::create_from_image(image));
+
+    auto program = programs.create(CHEAP_VS, BASIC_FS);
+    auto pass = std::make_shared<gst::BasicPass>(program);
     pass->set_blend_mode(gst::BlendMode::INTERPOLATIVE);
-    pass->set_cull_face(gst::CullFace::BACK);
     pass->set_depth_test(true);
 
-    std::vector<glm::vec3> tree_positions = {
-        glm::vec3( -50.0f, 3.0f,   50.0f),
-        glm::vec3(-300.0f, 0.0f, -800.0f),
-        glm::vec3(  30.0f, 0.0f, -420.0f),
-        glm::vec3( 120.0f, 8.0f, -200.0f),
-    };
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::piecewise_linear_distribution<> d;
 
-    std::vector<std::string> tree_paths = {
-        TREE1_PNG, TREE2_PNG, TREE3_PNG, TREE4_PNG
-    };
+    auto step = 8.0f;
+    auto points = 10;
+    for (auto x = 0; x < points; x++) {
+        for (auto y = 0; y < points; y++) {
+            for (auto z = 0; z < points; z++) {
+                const auto unit = 0;
+                auto material = gst::Material::create_free();
+                material.get_textures()[unit] = texture;
+                material.get_uniform("map") = unit;
+                material.get_uniform("diffuse") = glm::vec4(d(gen), d(gen), d(gen), 1.0f) + 0.1f;
+                material.get_uniform("scale") = glm::vec3(1.0f);
 
-    gst::ImageFactory image_factory(logger);
-    std::vector<std::shared_ptr<gst::Texture2D>> tree_textures;
+                auto mesh = mesh_factory.create_quad(1.0f, 1.0f);
+                auto model = gst::Model(mesh, material, pass);
+                auto billboard = std::make_shared<Billboard>(model);
+                billboard->position = glm::vec3(x, y, z) * step;
 
-    for (auto path : tree_paths) {
-        auto image = image_factory.create_from_file(path);
-        auto texture = std::make_shared<gst::Texture2D>(gst::Texture2D::create_from_image(image));
-        tree_textures.push_back(texture);
-    }
-
-    const auto unit = 0;
-    billboard_material = gst::Material::create_free();
-    billboard_material.get_uniform("color_map") = unit;
-    billboard_material.get_uniform("alpha") = 1.0f;
-    billboard_material.get_uniform("scale") = glm::vec3(0.1f);
-    billboard_material.get_uniform("billboarding") = billboarding;
-    billboard_material.get_uniform("spherical") = spherical;
-    billboard_material.get_uniform("cheap_method") = cheap_method;
-
-    gst::MeshFactory mesh_factory(logger);
-    for (int i = 0; i < 4; i++) {
-        auto texture = tree_textures[i];
-        billboard_material.get_textures()[unit] = texture;
-
-        auto size = texture->get_size();
-        auto mesh = mesh_factory.create_quad(size.get_width(), size.get_height());
-        auto model = gst::Model(mesh, billboard_material, pass);
-        auto billboard = std::make_shared<Billboard>(model);
-        billboard->position = tree_positions[i];
-        billboard->scale = glm::vec3(0.1f);
-
-        billboards.push_back(billboard);
-        scene.add(billboard);
+                billboards.push_back(billboard);
+                scene.add(billboard);
+            }
+        }
     }
 }
 
@@ -141,24 +96,18 @@ void Demo::update_input(float delta)
 
     if (input.pressed(gst::Key::F1)) {
         billboarding = !billboarding;
-        billboard_material.get_uniform("billboarding") = billboarding;
-
         std::string status = billboarding ? "on" : "off";
         logger->log("billboarding: " + status);
     }
 
     if (input.pressed(gst::Key::F2)) {
         spherical = !spherical;
-        billboard_material.get_uniform("spherical") = spherical;
-
         std::string status = spherical ? "spherical" : "cylindrical";
         logger->log("type: " + status);
     }
 
     if (input.pressed(gst::Key::F3)) {
         cheap_method = !cheap_method;
-        billboard_material.get_uniform("cheap_method") = cheap_method;
-
         std::string status = cheap_method ? "cheap" : "true";
         logger->log("method: " + status);
     }
@@ -169,6 +118,11 @@ void Demo::update_input(float delta)
 void Demo::update_billboards()
 {
     for (auto billboard : billboards) {
+        auto & material = billboard->get_material();
+        material.get_uniform("billboarding") = billboarding;
+        material.get_uniform("spherical") = spherical;
+        material.get_uniform("cheap_method") = cheap_method;
+
         if (billboarding && !cheap_method) {
             update_true(*billboard.get());
         } else {
