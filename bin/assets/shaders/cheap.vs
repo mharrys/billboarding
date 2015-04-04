@@ -16,7 +16,6 @@ out vec2 tex_coord;
 
 void main()
 {
-    position = vertex_position;
     tex_coord = vertex_tex_coord;
 
     mat4 billboard_mv = model_view;
@@ -34,5 +33,6 @@ void main()
         billboard_mv[2][2] = scale.z;
     }
 
-    gl_Position = projection * billboard_mv * vertex_position;
+    position = projection * billboard_mv * vertex_position;
+    gl_Position = position;
 }
